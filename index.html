@@ -563,69 +563,96 @@
 
   // THREE.JS VIEWER
   (function() {
-    const THREE = window.THREE;
-    let renderer, scene, camera, controls, currentModel;
+    let THREE;
+    let renderer, scene, camera;
     let animId;
 
+    // Показываем статус прямо в оверлее — крупно и видно
+    function setStatus(html) {
+      const el = document.getElementById('viewerLoading');
+      if (el) { el.style.display = 'flex'; el.innerHTML = html; }
+    }
+
+    function statusMsg(text, color) {
+      color = color || '#c8ff00';
+      return `<div style="font-family:'DM Mono',monospace;font-size:12px;color:${color};letter-spacing:0.15em;text-align:center;padding:16px;">${text}</div>`;
+    }
+
     function initViewer() {
+      THREE = window.THREE;
+      if (!THREE) { setStatus(statusMsg('THREE.JS НЕ ЗАГРУЖЕН', '#ff4444')); return; }
+      if (!THREE.GLTFLoader) { setStatus(statusMsg('GLTFLOADER НЕ ЗАГРУЖЕН', '#ff4444')); return; }
+
+      console.log('[3D Viewer] Three.js r' + THREE.REVISION + ' загружен');
+
       const canvas = document.getElementById('threeCanvas');
       if (!canvas) return;
 
-      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-      renderer.setPixelRatio(window.devicePixelRatio);
-      renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+      const w = canvas.clientWidth || canvas.offsetWidth || 560;
+      const h = 420;
+
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+      renderer.setClearColor(0x0d0d0d, 1); // тёмный фон чтобы модель была видна
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(w, h, false); // false = не трогать CSS
       renderer.outputEncoding = THREE.sRGBEncoding;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.2;
 
       scene = new THREE.Scene();
 
-      camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.01, 100);
-      camera.position.set(0, 0.05, 0.35);
+      camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 1000);
+      camera.position.set(0, 0, 2.5);
 
-      // Lighting
-      const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-      scene.add(ambient);
-      const key = new THREE.DirectionalLight(0xffffff, 1.2);
-      key.position.set(1, 2, 2);
-      scene.add(key);
-      const fill = new THREE.DirectionalLight(0xc8d4ff, 0.4);
-      fill.position.set(-2, 0, -1);
-      scene.add(fill);
-      const rim = new THREE.DirectionalLight(0xc8ff00, 0.15);
-      rim.position.set(0, -1, -2);
-      scene.add(rim);
+      // Освещение
+      scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+      const key = new THREE.DirectionalLight(0xffffff, 1.5);
+      key.position.set(2, 4, 4); scene.add(key);
+      const fill = new THREE.DirectionalLight(0xc8d4ff, 0.6);
+      fill.position.set(-3, 0, -2); scene.add(fill);
+      const rim = new THREE.DirectionalLight(0xc8ff00, 0.3);
+      rim.position.set(0, -2, -3); scene.add(rim);
 
-      // Simple orbit controls
-      let isDragging = false, prevX = 0, prevY = 0;
-      let rotX = 0, rotY = 0;
+      // Группа для вращения
       const group = new THREE.Group();
       scene.add(group);
       window._viewerGroup = group;
+      window._camera = camera;
+
+      // Управление мышью / тачем
+      let isDragging = false, prevX = 0, prevY = 0;
+      let rotX = 0, rotY = 0;
 
       canvas.addEventListener('mousedown', e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; canvas.style.cursor = 'grabbing'; });
-      canvas.addEventListener('mouseup', () => { isDragging = false; canvas.style.cursor = 'grab'; });
+      window.addEventListener('mouseup', () => { isDragging = false; canvas.style.cursor = 'grab'; });
       canvas.addEventListener('mousemove', e => {
         if (!isDragging) return;
         rotY += (e.clientX - prevX) * 0.008;
         rotX += (e.clientY - prevY) * 0.005;
-        rotX = Math.max(-0.6, Math.min(0.6, rotX));
+        rotX = Math.max(-0.7, Math.min(0.7, rotX));
         prevX = e.clientX; prevY = e.clientY;
       });
-      canvas.addEventListener('touchstart', e => { isDragging = true; prevX = e.touches[0].clientX; prevY = e.touches[0].clientY; });
+      canvas.addEventListener('touchstart', e => { isDragging = true; prevX = e.touches[0].clientX; prevY = e.touches[0].clientY; e.preventDefault(); }, {passive:false});
       canvas.addEventListener('touchend', () => { isDragging = false; });
       canvas.addEventListener('touchmove', e => {
         if (!isDragging) return;
         rotY += (e.touches[0].clientX - prevX) * 0.008;
         rotX += (e.touches[0].clientY - prevY) * 0.005;
-        rotX = Math.max(-0.6, Math.min(0.6, rotX));
+        rotX = Math.max(-0.7, Math.min(0.7, rotX));
         prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
-      });
+        e.preventDefault();
+      }, {passive:false});
+
+      // Zoom колёсиком
+      canvas.addEventListener('wheel', e => {
+        camera.position.z = Math.max(0.5, Math.min(6, camera.position.z + e.deltaY * 0.005));
+        e.preventDefault();
+      }, {passive:false});
 
       let autoRot = 0;
       function animate() {
         animId = requestAnimationFrame(animate);
-        if (!isDragging) autoRot += 0.003;
+        if (!isDragging) autoRot += 0.005;
         group.rotation.y = rotY + autoRot;
         group.rotation.x = rotX;
         renderer.render(scene, camera);
@@ -639,52 +666,102 @@
       document.querySelectorAll('.viewer-btn').forEach(b => b.classList.remove('active'));
       if (btn) btn.classList.add('active');
 
-      const loading = document.getElementById('viewerLoading');
-      loading.style.display = 'flex';
-
       const group = window._viewerGroup;
-      if (!group) return;
+      if (!group || !THREE) {
+        setStatus(statusMsg('VIEWER НЕ ИНИЦИАЛИЗИРОВАН', '#ff4444'));
+        return;
+      }
+
+      const filename = `headphones_${color}.glb`;
+      setStatus(statusMsg(`ЗАГРУЗКА ${filename.toUpperCase()}...`));
+
+      // Очищаем предыдущую модель
       while (group.children.length) group.remove(group.children[0]);
 
       const loader = new THREE.GLTFLoader();
-      // Use DRACOLoader if available
       if (THREE.DRACOLoader) {
         const draco = new THREE.DRACOLoader();
-        draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+        draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
         loader.setDRACOLoader(draco);
       }
 
+      // Таймаут 15 сек — если файл не найден на GitHub Pages, loader может молчать
+      const timeout = setTimeout(() => {
+        setStatus(`
+          <div style="text-align:center;padding:20px;">
+            <div style="font-family:'DM Mono',monospace;font-size:13px;color:#ff4444;letter-spacing:0.12em;margin-bottom:10px;">⚠ ФАЙЛ НЕ ЗАГРУЖЕН</div>
+            <div style="font-family:'DM Mono',monospace;font-size:11px;color:#888;margin-bottom:6px;">${filename}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:#555;">Убедись что .glb файл запушен в GitHub репозиторий</div>
+          </div>`);
+      }, 15000);
+
       loader.load(
-        `headphones_${color}.glb`,
+        filename,
         (gltf) => {
-          const model = gltf.scene;
-          // Center and scale
-          const box = new THREE.Box3().setFromObject(model);
-          const center = box.getCenter(new THREE.Vector3());
-          const size = box.getSize(new THREE.Vector3());
-          const maxDim = Math.max(size.x, size.y, size.z);
-          model.position.sub(center);
-          model.scale.setScalar(0.22 / maxDim);
-          group.add(model);
-          loading.style.display = 'none';
-        },
-        undefined,
-        (err) => {
-          console.error('GLB load error:', err);
-          loading.innerHTML = '<div style="font-family:\'DM Mono\',monospace;font-size:11px;color:#888;letter-spacing:0.1em;">MODEL NOT FOUND</div>';
-        }
+          clearTimeout(timeout);
+              console.log('[3D Viewer] Модель загружена:', filename);
+              const model = gltf.scene;
+
+              // Автоматически центрируем и масштабируем
+              const box = new THREE.Box3().setFromObject(model);
+              const center = box.getCenter(new THREE.Vector3());
+              const size = box.getSize(new THREE.Vector3());
+              const maxDim = Math.max(size.x, size.y, size.z);
+
+              console.log('[3D Viewer] Размер модели:', size, 'maxDim:', maxDim);
+
+              // ✅ Правильный порядок: сначала scale, потом position с учётом scale
+              // Иначе: position + scale*center ≠ 0 и модель съезжает
+              const scale = 1.0 / maxDim;
+              model.scale.setScalar(scale);
+              // position нужно задать так чтобы scale*center + position = 0
+              model.position.copy(center).multiplyScalar(-scale);
+
+              // Камера: отступаем на 1.5 высоты модели
+              const fov = camera.fov * (Math.PI / 180);
+              const camZ = (0.5 / Math.tan(fov / 2)) * 1.6;
+              if (window._camera) window._camera.position.set(0, 0, camZ);
+
+              group.add(model);
+
+              // Скрываем оверлей
+              const el = document.getElementById('viewerLoading');
+              if (el) el.style.display = 'none';
+            },
+            (xhr) => {
+              // Прогресс загрузки
+              if (xhr.total > 0) {
+                const pct = Math.round(xhr.loaded / xhr.total * 100);
+                setStatus(statusMsg(`ЗАГРУЗКА... ${pct}%`));
+              }
+            },
+            (err) => {
+              clearTimeout(timeout);
+              console.error('[3D Viewer] Ошибка загрузки GLB:', err);
+              setStatus(`
+                <div style="text-align:center;padding:20px;">
+                  <div style="font-family:'DM Mono',monospace;font-size:13px;color:#ff4444;letter-spacing:0.12em;margin-bottom:10px;">⚠ ФАЙЛ НЕ НАЙДЕН</div>
+                  <div style="font-family:'DM Mono',monospace;font-size:11px;color:#888;margin-bottom:6px;">${filename}</div>
+                  <div style="font-family:'DM Mono',monospace;font-size:10px;color:#555;">Убедись что .glb файл запушен в GitHub репозиторий</div>
+                </div>`);
+            }
       );
     };
 
-    // Load Three.js + GLTFLoader then init
-    function loadScript(src, cb) {
+    function loadScript(src, cb, errcb) {
       const s = document.createElement('script');
-      s.src = src; s.onload = cb; document.head.appendChild(s);
+      s.src = src;
+      s.onload = cb;
+      s.onerror = errcb || (() => { setStatus(statusMsg('CDN СКРИПТ НЕ ЗАГРУЖЕН:<br>' + src, '#ff4444')); });
+      document.head.appendChild(s);
     }
+
+    setStatus(statusMsg('ИНИЦИАЛИЗАЦИЯ...'));
 
     loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js', () => {
       loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js', () => {
         loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js', () => {
+          console.log('[3D Viewer] Все скрипты загружены, запускаем viewer...');
           initViewer();
         });
       });
